@@ -19,23 +19,47 @@
 </head>
 <body>
   <div class="container">
-    <h2 class="mb-4">Temperatursensoren konfigurieren</h2>
-    <p>Ziehen Sie die Sensoren in die gewünschte Reihenfolge von oben (Fühler oben im Puffer) nach unten.</p>
+    <div id="wifiConfig" class="mb-5">
+      <h2 class="mb-4">WLAN-Konfiguration</h2>
+      <div class="row">
+        <div class="col-md-6">
+          <div class="mb-3">
+            <label for="ssid" class="form-label">WLAN-Name (SSID)</label>
+            <input type="text" class="form-control" id="ssid" name="ssid">
+          </div>
+          <div class="mb-3">
+            <label for="password" class="form-label">WLAN-Passwort</label>
+            <input type="password" class="form-control" id="password" name="password">
+          </div>
+          <button id="saveWifiBtn" class="btn btn-primary">WLAN speichern</button>
+          <div id="wifiStatusMsg" class="mt-2"></div>
+        </div>
+      </div>
+    </div>
 
-    <div id="sensorList" class="mb-3"></div>
-
-    <button id="saveBtn" class="btn btn-primary">Speichern</button>
-    <div id="statusMsg" class="mt-3"></div>
+    <div id="sensorConfig">
+      <h2 class="mb-4">Temperatursensoren konfigurieren</h2>
+      <p>Ziehen Sie die Sensoren in die gewünschte Reihenfolge von oben (Fühler oben im Puffer) nach unten.</p>
+      <div id="sensorList" class="mb-3"></div>
+      <button id="saveBtn" class="btn btn-primary">Speichern</button>
+      <div id="statusMsg" class="mt-3"></div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script>
     let sensorData = [];
+    let updateInterval;
 
     async function fetchSensors() {
-      const res = await fetch("/get_sensors");
-      sensorData = await res.json();
-      renderSensorList();
+      try {
+        const res = await fetch("/get_sensors");
+        if (!res.ok) throw new Error('Network response was not ok');
+        sensorData = await res.json();
+        renderSensorList();
+      } catch (error) {
+        console.error('Error fetching sensors:', error);
+      }
     }
 
     function renderSensorList() {
@@ -53,30 +77,84 @@
         list.appendChild(div);
       });
 
-      Sortable.create(list, {
-        animation: 150
-      });
+      if (!list.sortableInstance) {
+        list.sortableInstance = Sortable.create(list, {
+          animation: 150
+        });
+      }
     }
 
     document.getElementById("saveBtn").addEventListener("click", async () => {
       const items = document.querySelectorAll("#sensorList .sensor-item");
       const order = Array.from(items).map(item => item.dataset.address);
-      const res = await fetch("/set_order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(order)
-      });
-      const status = document.getElementById("statusMsg");
-      if (res.ok) {
-        status.textContent = "Reihenfolge gespeichert ✔";
-        status.className = "text-success mt-3";
-      } else {
-        status.textContent = "Fehler beim Speichern ❌";
+      try {
+        const res = await fetch("/set_order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(order)
+        });
+        const status = document.getElementById("statusMsg");
+        if (res.ok) {
+          status.textContent = "Reihenfolge gespeichert ✔";
+          status.className = "text-success mt-3";
+        } else {
+          status.textContent = "Fehler beim Speichern ❌";
+          status.className = "text-danger mt-3";
+        }
+      } catch (error) {
+        console.error('Error saving order:', error);
+        const status = document.getElementById("statusMsg");
+        status.textContent = "Netzwerkfehler beim Speichern ❌";
         status.className = "text-danger mt-3";
       }
     });
 
-    fetchSensors();
+    document.getElementById("saveWifiBtn").addEventListener("click", async () => {
+      const ssid = document.getElementById("ssid").value;
+      const password = document.getElementById("password").value;
+      
+      if (!ssid) {
+        const status = document.getElementById("wifiStatusMsg");
+        status.textContent = "Bitte WLAN-Namen eingeben";
+        status.className = "text-danger mt-2";
+        return;
+      }
+      
+      try {
+        const res = await fetch("/set_wifi", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ssid, password })
+        });
+        
+        const status = document.getElementById("wifiStatusMsg");
+        if (res.ok) {
+          status.textContent = "WLAN-Konfiguration gespeichert. Gerät startet neu... ✔";
+          status.className = "text-success mt-2";
+        } else {
+          status.textContent = "Fehler beim Speichern ❌";
+          status.className = "text-danger mt-2";
+        }
+      } catch (error) {
+        console.error('Error saving WiFi config:', error);
+        const status = document.getElementById("wifiStatusMsg");
+        status.textContent = "Netzwerkfehler beim Speichern ❌";
+        status.className = "text-danger mt-2";
+      }
+    });
+
+    // Automatische Aktualisierung der Temperaturen
+    function startAutoUpdate() {
+      fetchSensors(); // Initial fetch
+      updateInterval = setInterval(fetchSensors, 10000); // Alle 10 Sekunden aktualisieren
+    }
+
+    // Cleanup beim Verlassen der Seite
+    window.addEventListener('beforeunload', () => {
+      if (updateInterval) clearInterval(updateInterval);
+    });
+
+    startAutoUpdate();
   </script>
 </body>
 </html>

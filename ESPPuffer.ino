@@ -7,16 +7,25 @@
 #include <ArduinoOTA.h>
 #include <ModbusTCPServer.h>
 #include <ArduinoJson.h>
+#include <DNSServer.h>
 
 // --- Konstanten und Einstellungen ---
 #define ONE_WIRE_BUS 4 // GPIO4 (D4) für DS18B20
 #define NUM_SENSORS_MAX 10
 #define CONFIG_FILE "/order.json"
+#define WIFI_CONFIG_FILE "/wifi.json"
 #define INDEX_HTML "/index.html"
+#define WIFI_TIMEOUT 30000 // 30 Sekunden Timeout für WLAN-Verbindung
+#define TEMP_UPDATE_INTERVAL 10000 // 10 Sekunden Intervall für Temperaturmessungen
+#define DNS_PORT 53
 
 // --- Netzwerkdaten ---
-const char* ssid = "FRITZ!Box Fon WLAN 7390";
-const char* password = "9247083248452941";
+String ssid;
+String password;
+const char* ap_ssid = "ESP32-Puffer-Setup";
+DNSServer dnsServer;
+bool isAP = false;
+unsigned long lastTempUpdate = 0;
 
 // --- Globale Variablen ---
 OneWire oneWire(ONE_WIRE_BUS);
@@ -115,10 +124,94 @@ void handlePostOrder() {
   loadOrder();
 }
 
+void loadWiFiConfig() {
+  if (!LittleFS.exists(WIFI_CONFIG_FILE)) return;
+  
+  File file = LittleFS.open(WIFI_CONFIG_FILE, "r");
+  if (!file) return;
+  
+  DynamicJsonDocument doc(256);
+  DeserializationError err = deserializeJson(doc, file);
+  file.close();
+  
+  if (err) return;
+  
+  ssid = doc["ssid"].as<String>();
+  password = doc["password"].as<String>();
+}
+
+void saveWiFiConfig() {
+  DynamicJsonDocument doc(256);
+  doc["ssid"] = ssid;
+  doc["password"] = password;
+  
+  File file = LittleFS.open(WIFI_CONFIG_FILE, "w");
+  if (!file) return;
+  
+  serializeJson(doc, file);
+  file.close();
+}
+
+void startAP() {
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ap_ssid);
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+  isAP = true;
+  Serial.println("AP Mode started");
+  Serial.print("IP: ");
+  Serial.println(WiFi.softAPIP());
+}
+
+bool connectWiFi() {
+  if (ssid.length() == 0) return false;
+  
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), password.c_str());
+  
+  unsigned long startAttemptTime = millis();
+  while (WiFi.status() != WL_CONNECTED && 
+         millis() - startAttemptTime < WIFI_TIMEOUT) {
+    delay(100);
+  }
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi connection failed");
+    return false;
+  }
+  
+  Serial.println("WiFi connected");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+  return true;
+}
+
+void handleWiFiConfig() {
+  if (server.hasArg("plain")) {
+    DynamicJsonDocument doc(256);
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    
+    if (!err) {
+      ssid = doc["ssid"].as<String>();
+      password = doc["password"].as<String>();
+      saveWiFiConfig();
+      
+      server.send(200, "text/plain", "OK");
+      delay(1000);
+      ESP.restart();
+      return;
+    }
+  }
+  server.send(400, "text/plain", "Invalid request");
+}
+
 void setup() {
   Serial.begin(115200);
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) delay(500);
+  LittleFS.begin();
+  
+  loadWiFiConfig();
+  if (!connectWiFi()) {
+    startAP();
+  }
 
   LittleFS.begin();
   scanSensors();
@@ -127,6 +220,7 @@ void setup() {
   server.on("/", handleRoot);
   server.on("/get_sensors", handleGetSensors);
   server.on("/set_order", HTTP_POST, handlePostOrder);
+  server.on("/set_wifi", HTTP_POST, handleWiFiConfig);
   server.begin();
 
   ArduinoOTA.setHostname("ESP32-Schichtung");
@@ -139,16 +233,35 @@ void setup() {
 }
 
 void loop() {
+  if (isAP) {
+    dnsServer.processNextRequest();
+  }
+  
   server.handleClient();
   ArduinoOTA.handle();
-
-  sensors.requestTemperatures();
-  for (uint8_t i = 0; i < sensorCount; i++) {
-    uint8_t realIndex = sensorOrder[i];
-    float temp = sensors.getTempC(foundAddresses[realIndex]);
-    temps[i] = (temp == DEVICE_DISCONNECTED_C) ? -1270 : (int16_t)(temp * 10);
-    modbusServer.holdingRegisterWrite(100 + i, temps[i]);
+  
+  // Temperaturmessung im definierten Intervall
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastTempUpdate >= TEMP_UPDATE_INTERVAL) {
+    lastTempUpdate = currentMillis;
+    
+    sensors.requestTemperatures();
+    for (uint8_t i = 0; i < sensorCount; i++) {
+      uint8_t realIndex = sensorOrder[i];
+      float temp = sensors.getTempC(foundAddresses[realIndex]);
+      temps[i] = (temp == DEVICE_DISCONNECTED_C) ? -1270 : (int16_t)(temp * 10);
+      modbusServer.holdingRegisterWrite(100 + i, temps[i]);
+    }
   }
-
-  delay(2000);
+  
+  // WLAN-Verbindung überprüfen und ggf. neu verbinden
+  if (!isAP && WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi connection lost, reconnecting...");
+    if (!connectWiFi()) {
+      Serial.println("Reconnection failed, starting AP mode...");
+      startAP();
+    }
+  }
+  
+  delay(10); // Kleine Pause für ESP32 Watchdog
 }
