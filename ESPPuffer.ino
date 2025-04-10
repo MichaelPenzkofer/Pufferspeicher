@@ -221,6 +221,13 @@ void setup() {
   server.on("/get_sensors", handleGetSensors);
   server.on("/set_order", HTTP_POST, handlePostOrder);
   server.on("/set_wifi", HTTP_POST, handleWiFiConfig);
+  server.on("/get_mode", HTTP_GET, []() {
+    DynamicJsonDocument doc(64);
+    doc["isAP"] = isAP;
+    String response;
+    serializeJson(doc, response);
+    server.send(200, "application/json", response);
+  });
   server.begin();
 
   ArduinoOTA.setHostname("ESP32-Schichtung");

@@ -19,8 +19,11 @@
 </head>
 <body>
   <div class="container">
-    <div id="wifiConfig" class="mb-5">
-      <h2 class="mb-4">WLAN-Konfiguration</h2>
+    <div id="wifiConfig" class="mb-5" style="display: none;">
+      <div class="alert alert-info" role="alert">
+        <h4 class="alert-heading">WLAN-Konfigurationsmodus</h4>
+        <p>Das Gerät befindet sich im Einrichtungsmodus. Bitte geben Sie Ihre WLAN-Zugangsdaten ein.</p>
+      </div>
       <div class="row">
         <div class="col-md-6">
           <div class="mb-3">
@@ -37,7 +40,7 @@
       </div>
     </div>
 
-    <div id="sensorConfig">
+    <div id="sensorConfig" style="display: none;">
       <h2 class="mb-4">Temperatursensoren konfigurieren</h2>
       <p>Ziehen Sie die Sensoren in die gewünschte Reihenfolge von oben (Fühler oben im Puffer) nach unten.</p>
       <div id="sensorList" class="mb-3"></div>
@@ -50,6 +53,28 @@
   <script>
     let sensorData = [];
     let updateInterval;
+    
+    async function checkMode() {
+      try {
+        const res = await fetch('/get_mode');
+        if (!res.ok) throw new Error('Network response was not ok');
+        const data = await res.json();
+        
+        // Zeige/verstecke Bereiche basierend auf dem Modus
+        document.getElementById('wifiConfig').style.display = data.isAP ? 'block' : 'none';
+        document.getElementById('sensorConfig').style.display = data.isAP ? 'none' : 'block';
+        
+        // Starte Sensor-Updates nur im normalen Modus
+        if (!data.isAP && !updateInterval) {
+          startAutoUpdate();
+        } else if (data.isAP && updateInterval) {
+          clearInterval(updateInterval);
+          updateInterval = null;
+        }
+      } catch (error) {
+        console.error('Error checking mode:', error);
+      }
+    }
 
     async function fetchSensors() {
       try {
@@ -154,7 +179,11 @@
       if (updateInterval) clearInterval(updateInterval);
     });
 
-    startAutoUpdate();
+    // Initialer Modus-Check
+    checkMode();
+    
+    // Prüfe regelmäßig den Modus (alle 5 Sekunden)
+    setInterval(checkMode, 5000);
   </script>
 </body>
 </html>
