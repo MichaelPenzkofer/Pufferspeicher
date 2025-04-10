@@ -14,9 +14,18 @@ Dieses Projekt implementiert ein intelligentes Temperatursensor-System für Puff
 
 ## Hardware-Anforderungen
 
-- ESP32 Mikrocontroller
-- DS18B20 Temperatursensoren (max. 10 Stück)
-- 4,7kΩ Pull-up Widerstand für den OneWire Bus
+### Notwendige Hardware
+
+- ESP32 Mikrocontroller https://amzn.to/3G2k1DU
+- DS18B20 Temperatursensoren (max. 10 Stück) https://amzn.to/4cv8dWT
+- DS18B20 Adapter Platine https://amzn.to/3R8Sxif
+- USB-C Kabel https://amzn.to/4lx5KPV
+- USB-Type-C Netzteil https://amzn.to/3XSio1A
+- Gehäuse https://amzn.to/4cBsmL2
+
+### Wenn du mir helfen möchtest
+
+Wenn du bei der Auswahl der Hardware über die hier verlinkten Amazon-Produktlinks kaufst, unterstützt du meine Arbeit an diesem Projekt. Einige Prozent des Kaufpreises werden mir als Provision zugesprochen, ohne dass du dadurch Mehrkosten hast. Vielen Dank für deine Unterstützung!
 
 ## Anschlüsse
 
