@@ -5,12 +5,13 @@
 #include <DallasTemperature.h>
 #include <LittleFS.h>
 #include <ArduinoOTA.h>
-#include <ModbusTCPServer.h>
+#include <ArduinoModbus.h>
+#include <ArduinoModbusTCP.h>
 #include <ArduinoJson.h>
 #include <DNSServer.h>
 
 // --- Konstanten und Einstellungen ---
-#define ONE_WIRE_BUS 12 // GPIO (D4) für DS18B20
+#define ONE_WIRE_BUS 12 // GPIO12 für DS18B20
 #define NUM_SENSORS_MAX 10
 #define CONFIG_FILE "/order.json"
 #define WIFI_CONFIG_FILE "/wifi.json"
