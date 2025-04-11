@@ -44,7 +44,10 @@
       <h2 class="mb-4">Temperatursensoren konfigurieren</h2>
       <p>Ziehen Sie die Sensoren in die gewünschte Reihenfolge von oben (Fühler oben im Puffer) nach unten.</p>
       <div id="sensorList" class="mb-3"></div>
-      <button id="saveBtn" class="btn btn-primary">Speichern</button>
+      <div class="d-flex gap-2 align-items-center">
+        <button id="saveBtn" class="btn btn-primary">Speichern</button>
+        <button id="resetBtn" class="btn btn-danger">WLAN zurücksetzen</button>
+      </div>
       <div id="statusMsg" class="mt-3"></div>
     </div>
   </div>
@@ -175,6 +178,20 @@
     }
 
     // Cleanup beim Verlassen der Seite
+    // Reset WLAN-Konfiguration
+    document.getElementById('resetBtn').addEventListener('click', async () => {
+      if (confirm('Möchten Sie wirklich die WLAN-Konfiguration zurücksetzen? Das Gerät wird neu gestartet.')) {
+        try {
+          const res = await fetch('/reset_wifi', { method: 'POST' });
+          if (!res.ok) throw new Error('Fehler beim Zurücksetzen');
+          alert('WLAN-Konfiguration wurde zurückgesetzt. Das Gerät startet neu...');
+        } catch (error) {
+          console.error('Reset error:', error);
+          alert('Fehler beim Zurücksetzen der WLAN-Konfiguration');
+        }
+      }
+    });
+
     window.addEventListener('beforeunload', () => {
       if (updateInterval) clearInterval(updateInterval);
     });

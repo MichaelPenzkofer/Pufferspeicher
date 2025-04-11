@@ -204,6 +204,20 @@ void handleWiFiConfig() {
   server.send(400, "text/plain", "Invalid request");
 }
 
+void resetWiFiConfig() {
+  // Lösche die WiFi-Konfigurationsdatei
+  if (LittleFS.exists(WIFI_CONFIG_FILE)) {
+    LittleFS.remove(WIFI_CONFIG_FILE);
+  }
+  delay(1000); // Kurze Verzögerung
+  ESP.restart(); // Neustart des ESP32
+}
+
+void handleResetWiFi() {
+  resetWiFiConfig();
+  server.send(200, "application/json", "{\"status\":\"success\"}");
+}
+
 void setup() {
   Serial.begin(115200);
   LittleFS.begin();
@@ -228,6 +242,7 @@ void setup() {
     serializeJson(doc, response);
     server.send(200, "application/json", response);
   });
+  server.on("/reset_wifi", HTTP_POST, handleResetWiFi);
   server.begin();
 
   ArduinoOTA.setHostname("ESP32-Schichtung");
