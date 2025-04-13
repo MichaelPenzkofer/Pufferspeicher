@@ -72,24 +72,57 @@ void scanSensors() {
 }
 
 void loadOrder() {
+  // Initialize default order
+  for (uint8_t i = 0; i < sensorCount; i++) {
+    sensorOrder[i] = i;
+  }
+
   if (!SPIFFS.exists(CONFIG_FILE)) {
-    for (uint8_t i = 0; i < sensorCount; i++) sensorOrder[i] = i;
     return;
   }
+
   File file = SPIFFS.open(CONFIG_FILE, "r");
   if (!file) return;
+
   String content = file.readString();
   file.close();
+
   DynamicJsonDocument doc(512);
   DeserializationError err = deserializeJson(doc, content);
   if (err) return;
-  for (uint8_t i = 0; i < sensorCount; i++) {
+
+  // Create a temporary array to track which sensors have been assigned
+  bool assigned[NUM_SENSORS_MAX] = {false};
+  uint8_t newOrder[NUM_SENSORS_MAX];
+  uint8_t assignedCount = 0;
+
+  // First pass: assign positions to sensors that are in the saved order
+  JsonArray array = doc.as<JsonArray>();
+  uint8_t savedCount = array.size();
+
+  for (uint8_t i = 0; i < savedCount && i < sensorCount; i++) {
+    String savedAddr = array[i].as<String>();
     for (uint8_t j = 0; j < sensorCount; j++) {
-      if (addressToString(foundAddresses[j]) == doc[i].as<String>()) {
-        sensorOrder[i] = j;
+      if (addressToString(foundAddresses[j]) == savedAddr) {
+        newOrder[assignedCount] = j;
+        assigned[j] = true;
+        assignedCount++;
         break;
       }
     }
+  }
+
+  // Second pass: append any new sensors that weren't in the saved order
+  for (uint8_t i = 0; i < sensorCount; i++) {
+    if (!assigned[i]) {
+      newOrder[assignedCount] = i;
+      assignedCount++;
+    }
+  }
+
+  // Copy the new order to sensorOrder
+  for (uint8_t i = 0; i < sensorCount; i++) {
+    sensorOrder[i] = newOrder[i];
   }
 }
 
@@ -107,14 +140,36 @@ void handleRoot() {
   Serial.println("index.html gesendet");
 }
 
+void handleGetInitialOrder() {
+  DynamicJsonDocument doc(1024);
+  JsonArray array = doc.to<JsonArray>();
+
+  // Send sensors in their configured order with temperatures
+  for (uint8_t i = 0; i < sensorCount; i++) {
+    JsonObject obj = array.createNestedObject();
+    uint8_t sensorIndex = sensorOrder[i];
+    obj["address"] = addressToString(foundAddresses[sensorIndex]);
+    float temp = sensors.getTempC(foundAddresses[sensorIndex]);
+    obj["temperature"] = (temp == DEVICE_DISCONNECTED_C) ? -127.0 : temp;
+  }
+
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
 void handleGetSensors() {
   DynamicJsonDocument doc(1024);
+  JsonArray array = doc.to<JsonArray>();
+
+  // Send all sensors with current temperatures
   for (uint8_t i = 0; i < sensorCount; i++) {
-    JsonObject obj = doc.createNestedObject();
+    JsonObject obj = array.createNestedObject();
     obj["address"] = addressToString(foundAddresses[i]);
     float temp = sensors.getTempC(foundAddresses[i]);
     obj["temperature"] = (temp == DEVICE_DISCONNECTED_C) ? -127.0 : temp;
   }
+
   String out;
   serializeJson(doc, out);
   server.send(200, "application/json", out);
@@ -208,17 +263,34 @@ void handleWiFiConfig() {
 }
 
 void resetWiFiConfig() {
-  // Lösche die WiFi-Konfigurationsdatei
   if (SPIFFS.exists(WIFI_CONFIG_FILE)) {
     SPIFFS.remove(WIFI_CONFIG_FILE);
   }
-  delay(1000); // Kurze Verzögerung
-  ESP.restart(); // Neustart des ESP32
+  ssid = "";
+  password = "";
+}
+
+void resetSensorOrder() {
+  if (SPIFFS.exists(CONFIG_FILE)) {
+    SPIFFS.remove(CONFIG_FILE);
+  }
+  // Reset to default order
+  for (uint8_t i = 0; i < sensorCount; i++) {
+    sensorOrder[i] = i;
+  }
 }
 
 void handleResetWiFi() {
   resetWiFiConfig();
-  server.send(200, "application/json", "{\"status\":\"success\"}");
+  server.send(200, "text/plain", "OK");
+  delay(1000);
+  ESP.restart();
+}
+
+void handleResetOrder() {
+  resetSensorOrder();
+  server.send(200, "text/plain", "OK");
+  // No restart needed for order reset
 }
 
 void setup() {
@@ -240,6 +312,7 @@ void setup() {
   loadOrder();
 
   server.on("/", handleRoot);
+  server.on("/get_initial_order", handleGetInitialOrder);
   server.on("/get_sensors", handleGetSensors);
   server.on("/set_order", HTTP_POST, handlePostOrder);
   server.on("/set_wifi", HTTP_POST, handleWiFiConfig);
@@ -251,9 +324,11 @@ void setup() {
     server.send(200, "application/json", response);
   });
   server.on("/reset_wifi", HTTP_POST, handleResetWiFi);
+  server.on("/reset_order", HTTP_POST, handleResetOrder);
   server.begin();
 
   ArduinoOTA.setHostname("ESP32-Schichtung");
+  ArduinoOTA.setPassword("puffer123");
   ArduinoOTA.begin();
   Serial.println("OTA bereit");
 
@@ -297,5 +372,5 @@ void loop() {
     }
   }
   
-  delay(10); // Kleine Pause für ESP32 Watchdog
+  delay(5); // Kleine Pause für ESP32 Watchdog
 }

@@ -46,9 +46,19 @@ const char index_html[] PROGMEM = R"rawliteral(
       user-select: none;
       transition: background-color 0.15s ease;
       touch-action: none;
+      text-align: center;
     }
     .sensor-item:last-child {
       margin-bottom: 0;
+    }
+    .sensor-temp {
+      font-size: 2em;
+      font-weight: bold;
+      margin-bottom: 0.25rem;
+    }
+    .sensor-address {
+      font-size: 1em;
+      color: #6c757d;
     }
     .sensor-item-ghost {
       opacity: 0.5;
@@ -107,6 +117,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="d-flex gap-2 align-items-center">
         <button id="saveBtn" class="btn btn-primary">Speichern</button>
         <button id="resetBtn" class="btn btn-danger">WLAN zurücksetzen</button>
+        <button id="resetOrderBtn" class="btn btn-warning">Fühlerreihenfolge zurücksetzen</button>
       </div>
       <div id="statusMsg" class="mt-3"></div>
     </div>
@@ -116,7 +127,7 @@ const char index_html[] PROGMEM = R"rawliteral(
   <script>
     let sensorData = [];
     let updateInterval;
-    let isInitialLoad = true;
+    let initialOrderLoaded = false;
     
     async function checkMode() {
       try {
@@ -128,6 +139,9 @@ const char index_html[] PROGMEM = R"rawliteral(
         document.getElementById('sensorConfig').style.display = data.isAP ? 'none' : 'block';
         
         if (!data.isAP && !updateInterval) {
+          if (!initialOrderLoaded) {
+            await loadInitialOrder();
+          }
           startAutoUpdate();
         } else if (data.isAP && updateInterval) {
           clearInterval(updateInterval);
@@ -138,29 +152,37 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
     }
 
+    async function loadInitialOrder() {
+      try {
+        const res = await fetch('/get_initial_order');
+        if (!res.ok) throw new Error('Network response was not ok');
+        sensorData = await res.json();
+        initialOrderLoaded = true;
+        renderSensorList();
+      } catch (error) {
+        console.error('Error loading initial order:', error);
+      }
+    }
+
     async function fetchSensors() {
+      if (!initialOrderLoaded) return;
+      
       try {
         const res = await fetch('/get_sensors');
         if (!res.ok) throw new Error('Network response was not ok');
         const newData = await res.json();
         
-        if (isInitialLoad) {
-          // On first load, use the server's order
-          sensorData = newData;
-          isInitialLoad = false;
-        } else {
-          // Update temperatures while maintaining current order
-          const container = document.querySelector('.sensor-container');
-          if (container) {
-            const currentOrder = Array.from(container.children)
-              .map(item => item.dataset.address);
-            
-            // Update temperatures while keeping current order
-            sensorData = currentOrder.map(address => {
-              const newSensor = newData.find(s => s.address === address);
-              return newSensor || sensorData.find(s => s.address === address);
-            });
-          }
+        // Update temperatures while maintaining current order
+        const container = document.querySelector('.sensor-container');
+        if (container) {
+          const currentOrder = Array.from(container.children)
+            .map(item => item.dataset.address);
+          
+          // Update temperatures while keeping current order
+          sensorData = currentOrder.map(address => {
+            const newSensor = newData.find(s => s.address === address);
+            return newSensor || sensorData.find(s => s.address === address);
+          });
         }
         
         renderSensorList();
@@ -207,8 +229,8 @@ const char index_html[] PROGMEM = R"rawliteral(
           div.className = 'sensor-item';
           div.dataset.address = sensor.address;
           div.innerHTML = 
-            '<strong>' + sensor.address + '</strong><br>' +
-            'Temperatur: ' + sensor.temperature.toFixed(1) + ' °C';
+            '<div class="sensor-temp">' + sensor.temperature.toFixed(1) + ' °C</div>' +
+            '<div class="sensor-address">' + sensor.address + '</div>';
           container.appendChild(div);
         });
 
@@ -292,14 +314,33 @@ const char index_html[] PROGMEM = R"rawliteral(
     });
 
     document.getElementById('resetBtn').addEventListener('click', async () => {
-      if (confirm('Möchten Sie wirklich die WLAN-Konfiguration zurücksetzen? Das Gerät wird neu gestartet.')) {
+      if (confirm('Möchten Sie wirklich die WLAN-Konfiguration zurücksetzen?')) {
         try {
           const res = await fetch('/reset_wifi', { method: 'POST' });
-          if (!res.ok) throw new Error('Fehler beim Zurücksetzen');
+          if (!res.ok) throw new Error('Network response was not ok');
           alert('WLAN-Konfiguration wurde zurückgesetzt. Das Gerät startet neu...');
         } catch (error) {
           console.error('Reset error:', error);
           alert('Fehler beim Zurücksetzen der WLAN-Konfiguration');
+        }
+      }
+    });
+
+    document.getElementById('resetOrderBtn').addEventListener('click', async () => {
+      if (confirm('Möchten Sie wirklich die Fühlerreihenfolge zurücksetzen?')) {
+        try {
+          const res = await fetch('/reset_order', { method: 'POST' });
+          if (!res.ok) throw new Error('Network response was not ok');
+          
+          // Reload initial order after reset
+          await loadInitialOrder();
+          
+          document.getElementById('statusMsg').innerHTML = 
+            '<div class="alert alert-success">Fühlerreihenfolge wurde zurückgesetzt!</div>';
+        } catch (error) {
+          console.error('Reset order error:', error);
+          document.getElementById('statusMsg').innerHTML = 
+            '<div class="alert alert-danger">Fehler beim Zurücksetzen der Fühlerreihenfolge!</div>';
         }
       }
     });

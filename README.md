@@ -1,5 +1,7 @@
 # Pufferspeicher-Temperatursensor System
 
+[English version](README.en.md)
+
 Dieses Projekt implementiert ein intelligentes Temperatursensor-System für Pufferspeicher auf Basis eines ESP32. Es ermöglicht die Überwachung mehrerer DS18B20 Temperatursensoren und deren flexible Anordnung über eine Weboberfläche.
 
 ## Funktionen
@@ -7,10 +9,34 @@ Dieses Projekt implementiert ein intelligentes Temperatursensor-System für Puff
 - Unterstützung für bis zu 10 DS18B20 Temperatursensoren
 - Benutzerfreundliche Weboberfläche zur Konfiguration
 - Drag & Drop Interface zur Anordnung der Sensoren
+- Speichern und Zurücksetzen der Fühlerreihenfolge
 - Automatische WLAN-Konfiguration im ersten Start
 - Modbus TCP Server für Systemintegration
-- Over-the-Air (OTA) Updates
+- Over-the-Air (OTA) Updates mit Passwortschutz
 - Automatische Wiederverbindung bei WLAN-Verlust
+- Offline-fähige Weboberfläche ohne externe Ressourcen
+
+## Installation und Einrichtung
+
+### Arduino IDE Einstellungen
+
+1. Board: "ESP32 Dev Module" (Standardeinstellungen)
+2. Upload Speed: 921600
+3. CPU Frequency: 240MHz (WiFi/BT)
+4. Flash Frequency: 80MHz
+5. Flash Mode: QIO
+6. Flash Size: 4MB (32Mb)
+7. Partition Scheme: Default 4MB with spiffs
+
+### Over-the-Air (OTA) Updates
+
+Nach der ersten Installation über USB können weitere Updates drahtlos durchgeführt werden:
+
+1. ESP32 mit dem WLAN verbinden
+2. In der Arduino IDE unter Tools -> Port den Netzwerk-Port auswählen
+   - Der ESP32 erscheint als "ESP32-Schichtung at 192.168.x.x"
+3. Beim Upload das Passwort "puffer123" eingeben
+4. Der Upload startet automatisch
 
 ## Hardware-Anforderungen
 
