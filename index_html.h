@@ -32,7 +32,11 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
   </style>
   <style>
-    body { background-color: #f8f9fa; padding: 2rem; }
+    body { 
+      background-color: #f8f9fa; 
+      padding: 2rem; 
+      font-family: Arial, Helvetica, sans-serif;
+    }
     .sensor-container {
       min-height: 50px;
     }
@@ -111,15 +115,15 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
 
     <div id="sensorConfig" style="display: none;">
-      <h2 class="mb-4">Temperatursensoren konfigurieren</h2>
+      <h2>Sensorkonfiguration</h2>
       <p>Ziehen Sie die Sensoren in die gewünschte Reihenfolge von oben (Fühler oben im Puffer) nach unten.</p>
-      <div id="sensorList" class="mb-3"></div>
-      <div class="d-flex gap-2 align-items-center">
+      <div id="statusMsg" class="mb-3"></div>
+      <div id="sensorList"></div>
+      <div class="d-flex gap-2 align-items-center mt-3">
         <button id="saveBtn" class="btn btn-primary">Speichern</button>
         <button id="resetBtn" class="btn btn-danger">WLAN zurücksetzen</button>
         <button id="resetOrderBtn" class="btn btn-warning">Fühlerreihenfolge zurücksetzen</button>
       </div>
-      <div id="statusMsg" class="mt-3"></div>
     </div>
   </div>
 
@@ -153,14 +157,17 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     async function loadInitialOrder() {
+      showStatus('Lade gespeicherte Reihenfolge...', 'info');
       try {
         const res = await fetch('/get_initial_order');
         if (!res.ok) throw new Error('Network response was not ok');
         sensorData = await res.json();
         initialOrderLoaded = true;
         renderSensorList();
+        showStatus('Reihenfolge geladen', 'info');
       } catch (error) {
         console.error('Error loading initial order:', error);
+        showStatus('Fehler beim Laden der Reihenfolge!', 'error');
       }
     }
 
@@ -210,6 +217,34 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
     }
 
+    function showStatus(message, type = 'info') {
+      const statusDiv = document.getElementById('statusMsg');
+      if (statusDiv) {
+        let alertClass = 'alert ';
+        switch(type) {
+          case 'success':
+            alertClass += 'alert-success';
+            break;
+          case 'error':
+            alertClass += 'alert-danger';
+            break;
+          case 'warning':
+            alertClass += 'alert-warning';
+            break;
+          default:
+            alertClass += 'alert-info';
+        }
+        statusDiv.innerHTML = `<div class="${alertClass}" role="alert">${message}</div>`;
+        
+        // Auto-hide success and info messages after 5 seconds
+        if (type === 'success' || type === 'info') {
+          setTimeout(() => {
+            statusDiv.innerHTML = '';
+          }, 5000);
+        }
+      }
+    }
+
     function renderSensorList() {
       const list = document.getElementById('sensorList');
       if (!list) return;
@@ -251,29 +286,31 @@ const char index_html[] PROGMEM = R"rawliteral(
     }
 
     document.getElementById('saveBtn').addEventListener('click', async () => {
-      const items = document.querySelectorAll('#sensorList .sensor-item');
-      const order = Array.from(items).map(item => item.dataset.address);
+      const container = document.querySelector('.sensor-container');
+      if (!container) {
+        showStatus('Keine Sensoren gefunden!', 'error');
+        return;
+      }
+      
+      showStatus('Speichere Reihenfolge...', 'info');
+      
+      const order = Array.from(container.children)
+        .map(item => item.dataset.address);
+      
       try {
         const res = await fetch('/set_order', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(order),
+          body: JSON.stringify(order)
         });
         
         if (!res.ok) throw new Error('Network response was not ok');
-        
-        document.getElementById('statusMsg').innerHTML = 
-          '<div class="alert alert-success">' +
-          'Reihenfolge erfolgreich gespeichert!' +
-          '</div>';
+        showStatus('Reihenfolge wurde gespeichert!', 'info');
       } catch (error) {
-        console.error('Error saving order:', error);
-        document.getElementById('statusMsg').innerHTML = 
-          '<div class="alert alert-danger">' +
-          'Fehler beim Speichern der Reihenfolge!' +
-          '</div>';
+        console.error('Save error:', error);
+        showStatus('Fehler beim Speichern der Reihenfolge!', 'error');
       }
     });
 
@@ -328,6 +365,8 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     document.getElementById('resetOrderBtn').addEventListener('click', async () => {
       if (confirm('Möchten Sie wirklich die Fühlerreihenfolge zurücksetzen?')) {
+        showStatus('Setze Fühlerreihenfolge zurück...', 'info');
+        
         try {
           const res = await fetch('/reset_order', { method: 'POST' });
           if (!res.ok) throw new Error('Network response was not ok');
@@ -335,12 +374,10 @@ const char index_html[] PROGMEM = R"rawliteral(
           // Reload initial order after reset
           await loadInitialOrder();
           
-          document.getElementById('statusMsg').innerHTML = 
-            '<div class="alert alert-success">Fühlerreihenfolge wurde zurückgesetzt!</div>';
+          showStatus('Fühlerreihenfolge wurde zurückgesetzt!', 'info');
         } catch (error) {
           console.error('Reset order error:', error);
-          document.getElementById('statusMsg').innerHTML = 
-            '<div class="alert alert-danger">Fehler beim Zurücksetzen der Fühlerreihenfolge!</div>';
+          showStatus('Fehler beim Zurücksetzen der Fühlerreihenfolge!', 'error');
         }
       }
     });

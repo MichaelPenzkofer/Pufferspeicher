@@ -16,7 +16,7 @@
 #define WIFI_CONFIG_FILE "/wifi.json"
 #define INDEX_HTML "/index.html"
 #define WIFI_TIMEOUT 30000 // 30 Sekunden Timeout für WLAN-Verbindung
-#define TEMP_UPDATE_INTERVAL 10000 // 10 Sekunden Intervall für Temperaturmessungen
+#define TEMP_UPDATE_INTERVAL 2000 // 2 Sekunden Intervall für Temperaturmessungen
 #define DNS_PORT 53
 
 // --- Netzwerkdaten ---
@@ -295,6 +295,12 @@ void handleResetOrder() {
 
 void setup() {
   Serial.begin(115200);
+  Serial.println("\nPufferspeicher Temperatursensor System startet...");
+  
+  // Sensoren initialisieren
+  sensors.begin();
+  sensors.setResolution(12); // 12-bit Auflösung (0.0625°C)
+  sensors.setWaitForConversion(true);
   
   // Initialize SPIFFS
   if(!SPIFFS.begin(true)) {
@@ -372,5 +378,5 @@ void loop() {
     }
   }
   
-  delay(5); // Kleine Pause für ESP32 Watchdog
+  delay(10); // Kleine Pause für ESP32 Watchdog
 }
