@@ -3,15 +3,14 @@
 #include <WebServer.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#include <LittleFS.h>
 #include <ArduinoOTA.h>
-#include <ArduinoModbus.h>
-#include <ArduinoModbusTCP.h>
+#include <ModbusTCP.h>
 #include <ArduinoJson.h>
 #include <DNSServer.h>
+#include <SPIFFS.h>
 
 // --- Konstanten und Einstellungen ---
-#define ONE_WIRE_BUS 12 // GPIO12 für DS18B20
+#define ONE_WIRE_BUS 4 // GPIO4 für DS18B20
 #define NUM_SENSORS_MAX 10
 #define CONFIG_FILE "/order.json"
 #define WIFI_CONFIG_FILE "/wifi.json"
@@ -31,8 +30,11 @@ unsigned long lastTempUpdate = 0;
 // --- Globale Variablen ---
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
+// HTML-Datei im Flash-Speicher
+#include "index_html.h"
+
 WebServer server(80);
-ModbusTCPServer modbusServer;
+ModbusTCP modbusTCP;
 DeviceAddress foundAddresses[NUM_SENSORS_MAX];
 uint8_t sensorCount = 0;
 uint8_t sensorOrder[NUM_SENSORS_MAX];
@@ -70,11 +72,11 @@ void scanSensors() {
 }
 
 void loadOrder() {
-  if (!LittleFS.exists(CONFIG_FILE)) {
+  if (!SPIFFS.exists(CONFIG_FILE)) {
     for (uint8_t i = 0; i < sensorCount; i++) sensorOrder[i] = i;
     return;
   }
-  File file = LittleFS.open(CONFIG_FILE, "r");
+  File file = SPIFFS.open(CONFIG_FILE, "r");
   if (!file) return;
   String content = file.readString();
   file.close();
@@ -92,7 +94,7 @@ void loadOrder() {
 }
 
 void saveOrder(String json) {
-  File file = LittleFS.open(CONFIG_FILE, "w");
+  File file = SPIFFS.open(CONFIG_FILE, "w");
   if (!file) return;
   file.print(json);
   file.close();
@@ -100,9 +102,9 @@ void saveOrder(String json) {
 
 // --- HTTP-Endpunkte ---
 void handleRoot() {
-  File file = LittleFS.open(INDEX_HTML, "r");
-  server.streamFile(file, "text/html");
-  file.close();
+  Serial.println("Handling root request...");
+  server.send(200, "text/html", index_html);
+  Serial.println("index.html gesendet");
 }
 
 void handleGetSensors() {
@@ -126,9 +128,9 @@ void handlePostOrder() {
 }
 
 void loadWiFiConfig() {
-  if (!LittleFS.exists(WIFI_CONFIG_FILE)) return;
+  if (!SPIFFS.exists(WIFI_CONFIG_FILE)) return;
   
-  File file = LittleFS.open(WIFI_CONFIG_FILE, "r");
+  File file = SPIFFS.open(WIFI_CONFIG_FILE, "r");
   if (!file) return;
   
   DynamicJsonDocument doc(256);
@@ -146,7 +148,7 @@ void saveWiFiConfig() {
   doc["ssid"] = ssid;
   doc["password"] = password;
   
-  File file = LittleFS.open(WIFI_CONFIG_FILE, "w");
+  File file = SPIFFS.open(WIFI_CONFIG_FILE, "w");
   if (!file) return;
   
   serializeJson(doc, file);
@@ -207,8 +209,8 @@ void handleWiFiConfig() {
 
 void resetWiFiConfig() {
   // Lösche die WiFi-Konfigurationsdatei
-  if (LittleFS.exists(WIFI_CONFIG_FILE)) {
-    LittleFS.remove(WIFI_CONFIG_FILE);
+  if (SPIFFS.exists(WIFI_CONFIG_FILE)) {
+    SPIFFS.remove(WIFI_CONFIG_FILE);
   }
   delay(1000); // Kurze Verzögerung
   ESP.restart(); // Neustart des ESP32
@@ -221,14 +223,19 @@ void handleResetWiFi() {
 
 void setup() {
   Serial.begin(115200);
-  LittleFS.begin();
   
+  // Initialize SPIFFS
+  if(!SPIFFS.begin(true)) {
+    Serial.println("SPIFFS Mount Failed");
+    return;
+  }
+  Serial.println("SPIFFS Mount Successful");
+   
   loadWiFiConfig();
   if (!connectWiFi()) {
     startAP();
   }
 
-  LittleFS.begin();
   scanSensors();
   loadOrder();
 
@@ -250,8 +257,12 @@ void setup() {
   ArduinoOTA.begin();
   Serial.println("OTA bereit");
 
-  modbusServer.begin();
-  modbusServer.configureHoldingRegisters(100, NUM_SENSORS_MAX);
+  modbusTCP.server(502);
+  // Modbus Holding Register Adressen: 100-109 für Temperaturen
+  // Initialisiere die Holding Register mit 0
+  for (uint8_t i = 0; i < NUM_SENSORS_MAX; i++) {
+    modbusTCP.writeHreg(0, 100 + i, 0, nullptr, MODBUSIP_UNIT);
+  }
   Serial.println("Modbus TCP Server gestartet");
 }
 
@@ -273,7 +284,7 @@ void loop() {
       uint8_t realIndex = sensorOrder[i];
       float temp = sensors.getTempC(foundAddresses[realIndex]);
       temps[i] = (temp == DEVICE_DISCONNECTED_C) ? -1270 : (int16_t)(temp * 10);
-      modbusServer.holdingRegisterWrite(100 + i, temps[i]);
+      modbusTCP.writeHreg(0, 100 + i, (uint16_t)temps[i], nullptr, MODBUSIP_UNIT);  // Temperatur in Holding Register schreiben
     }
   }
   
