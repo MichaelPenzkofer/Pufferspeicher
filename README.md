@@ -141,6 +141,31 @@ Dieses Projekt ist unter der MIT-Lizenz veröffentlicht. Siehe [LICENSE](LICENSE
 
 Michael Penzkofer
 
+## Geplante Erweiterungen
+
+Die folgenden Integrationen sind für zukünftige Versionen geplant:
+
+### Home Assistant Integration
+- Modbus TCP Einbindung der Temperatursensoren in Home Assistant
+- Visualisierung mit Home Assistant
+- Konfiguration über Home Assistant
+
+### ESPHome Display Integration
+- Anzeige der Temperaturen auf einem ESP32 Display
+- Erstellung mit ESPHome Builder
+- Echtzeit-Visualisierung der Pufferschichtung
+
+### Node-RED Integration
+- Fertige Node-RED Flows für gängige Anwendungsfälle
+- Automatisierte Datenaufzeichnung
+
+### Wago CoDeSys Integration
+- Modbus TCP Bibliothek für CoDeSys
+- Beispielprogramm für Wago Controller
+- Dokumentation zur SPS-Integration
+
+*Diese Funktionen befinden sich in Entwicklung und werden nach und nach veröffentlicht.*
+
 ## Contributing
 
 Pull Requests sind willkommen. Für größere Änderungen erstellen Sie bitte zuerst ein Issue, um die Änderungen zu diskutieren.

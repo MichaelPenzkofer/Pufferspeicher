@@ -141,6 +141,31 @@ This project is released under the MIT License. See [LICENSE](LICENSE) file for 
 
 Michael Penzkofer
 
+## Planned Extensions
+
+The following integrations are planned for future versions:
+
+### Home Assistant Integration
+- Modbus TCP integration of temperature sensors into Home Assistant
+- Visualization with Home Assistant
+- Configuration through Home Assistant
+
+### ESPHome Display Integration
+- Display temperatures on an ESP32 display
+- Creation using ESPHome Builder
+- Real-time visualization of buffer tank stratification
+
+### Node-RED Integration
+- Ready-to-use Node-RED flows for common use cases
+- Automated data logging
+
+### Wago CoDeSys Integration
+- Modbus TCP library for CoDeSys
+- Example program for Wago controllers
+- PLC integration documentation
+
+*These features are under development and will be released gradually.*
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
