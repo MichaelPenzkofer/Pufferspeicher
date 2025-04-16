@@ -4,7 +4,7 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ArduinoOTA.h>
-#include <ModbusTCP.h>
+#include <ModbusIP_ESP8266.h>
 #include <ArduinoJson.h>
 #include <DNSServer.h>
 #include <SPIFFS.h>
@@ -16,8 +16,10 @@
 #define WIFI_CONFIG_FILE "/wifi.json"
 #define INDEX_HTML "/index.html"
 #define WIFI_TIMEOUT 30000 // 30 Sekunden Timeout für WLAN-Verbindung
-#define TEMP_UPDATE_INTERVAL 2000 // 2 Sekunden Intervall für Temperaturmessungen
+#define TEMP_UPDATE_INTERVAL 12000 // 12 Sekunden Intervall für Temperaturmessungen (750ms * 10 Sensoren + Overhead)
 #define DNS_PORT 53
+#define WIFI_CHECK_INTERVAL 60000 // 60 Sekunden Intervall für WLAN-Prüfung
+#define SERVER_WATCHDOG_INTERVAL 300000 // 5 Minuten Intervall für Webserver-Watchdog
 
 // --- Netzwerkdaten ---
 String ssid;
@@ -26,15 +28,25 @@ const char* ap_ssid = "ESP32-Puffer-Setup";
 DNSServer dnsServer;
 bool isAP = false;
 unsigned long lastTempUpdate = 0;
+unsigned long lastWiFiCheck = 0;
+unsigned long lastServerCheck = 0;
+unsigned long serverRequestCount = 0;
+unsigned long lastRequestCount = 0;
 
 // --- Globale Variablen ---
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
+ModbusIP mb; // ModbusIP Instanz
+
+// Modbus Register Adressen
+#define MB_TEMP_START 100  // Startadresse für Temperaturen
+#define WEB_SERVER_INTERVAL 100  // Webserver-Aktualisierungsintervall in ms
+#define MB_STATUS_REG 99   // Status Register
+
 // HTML-Datei im Flash-Speicher
 #include "index_html.h"
 
 WebServer server(80);
-ModbusTCP modbusTCP;
 DeviceAddress foundAddresses[NUM_SENSORS_MAX];
 uint8_t sensorCount = 0;
 uint8_t sensorOrder[NUM_SENSORS_MAX];
@@ -244,22 +256,44 @@ bool connectWiFi() {
 }
 
 void handleWiFiConfig() {
-  if (server.hasArg("plain")) {
-    DynamicJsonDocument doc(256);
-    DeserializationError err = deserializeJson(doc, server.arg("plain"));
-    
-    if (!err) {
-      ssid = doc["ssid"].as<String>();
-      password = doc["password"].as<String>();
-      saveWiFiConfig();
-      
-      server.send(200, "text/plain", "OK");
-      delay(1000);
-      ESP.restart();
-      return;
-    }
+  if (server.method() != HTTP_POST) {
+    server.send(405, "text/plain", "Method Not Allowed");
+    return;
   }
-  server.send(400, "text/plain", "Invalid request");
+
+  if (!server.hasArg("plain")) {
+    server.send(400, "text/plain", "Keine Daten empfangen");
+    return;
+  }
+
+  DynamicJsonDocument doc(256);
+  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+
+  if (error) {
+    server.send(400, "text/plain", "Ungültige JSON-Daten");
+    return;
+  }
+
+  if (!doc.containsKey("ssid") || !doc.containsKey("password")) {
+    server.send(400, "text/plain", "SSID und Passwort erforderlich");
+    return;
+  }
+
+  String newSsid = doc["ssid"].as<String>();
+  String newPassword = doc["password"].as<String>();
+
+  if (newSsid.length() == 0) {
+    server.send(400, "text/plain", "SSID darf nicht leer sein");
+    return;
+  }
+  
+  ssid = newSsid;
+  password = newPassword;
+  saveWiFiConfig();
+  
+  server.send(200, "text/plain", "OK");
+  delay(1000);
+  ESP.restart();
 }
 
 void resetWiFiConfig() {
@@ -268,6 +302,15 @@ void resetWiFiConfig() {
   }
   ssid = "";
   password = "";
+  WiFi.mode(WIFI_OFF);
+  delay(1000);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ap_ssid);
+  dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+  isAP = true;
+  Serial.println("AP Mode started");
+  Serial.print("IP: ");
+  Serial.println(WiFi.softAPIP());
 }
 
 void resetSensorOrder() {
@@ -281,9 +324,10 @@ void resetSensorOrder() {
 }
 
 void handleResetWiFi() {
-  resetWiFiConfig();
   server.send(200, "text/plain", "OK");
-  delay(1000);
+  delay(100);  // Brief delay to allow response to be sent
+  resetWiFiConfig();
+  delay(1000);  // Allow time for AP mode to start
   ESP.restart();
 }
 
@@ -309,74 +353,149 @@ void setup() {
   }
   Serial.println("SPIFFS Mount Successful");
    
+  // OTA Setup
+  ArduinoOTA.setHostname("ESP32-Schichtung");
+  ArduinoOTA.setPassword("puffer123");
+  ArduinoOTA.setPort(3232);  // Standard ESP32 OTA Port
+  
+  ArduinoOTA.onStart([]() {
+    Serial.println("OTA Start");
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nOTA End");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+  
   loadWiFiConfig();
   if (!connectWiFi()) {
     startAP();
+  } else {
+    // Modbus Server nur initialisieren, wenn wir im Station-Modus sind
+    mb.server();
+    
+    // Modbus Register initialisieren
+    mb.addHreg(MB_STATUS_REG);
+    for(int i = 0; i < NUM_SENSORS_MAX; i++) {
+      mb.addHreg(MB_TEMP_START + i);
+    }
+    
+    Serial.println("Modbus TCP Server gestartet auf Port 502");
   }
+  
+  ArduinoOTA.begin();
+  Serial.println("OTA bereit");
 
   scanSensors();
   loadOrder();
 
-  server.on("/", handleRoot);
-  server.on("/get_initial_order", handleGetInitialOrder);
-  server.on("/get_sensors", handleGetSensors);
+  // Server-Endpunkte registrieren
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/get_sensors", HTTP_GET, handleGetSensors);
   server.on("/set_order", HTTP_POST, handlePostOrder);
+  server.on("/get_initial_order", HTTP_GET, handleGetInitialOrder);
+  server.on("/reset_order", HTTP_POST, handleResetOrder);
+  server.on("/reset_wifi", HTTP_POST, handleResetWiFi);
   server.on("/set_wifi", HTTP_POST, handleWiFiConfig);
   server.on("/get_mode", HTTP_GET, []() {
     DynamicJsonDocument doc(64);
     doc["isAP"] = isAP;
     String response;
     serializeJson(doc, response);
+    Serial.print("Current mode: ");
+    Serial.println(isAP ? "AP" : "STA");
     server.send(200, "application/json", response);
   });
-  server.on("/reset_wifi", HTTP_POST, handleResetWiFi);
-  server.on("/reset_order", HTTP_POST, handleResetOrder);
   server.begin();
 
-  ArduinoOTA.setHostname("ESP32-Schichtung");
-  ArduinoOTA.setPassword("puffer123");
-  ArduinoOTA.begin();
-  Serial.println("OTA bereit");
+  // OTA wurde bereits konfiguriert
 
-  modbusTCP.server(502);
-  // Modbus Holding Register Adressen: 100-109 für Temperaturen
-  // Initialisiere die Holding Register mit 0
-  for (uint8_t i = 0; i < NUM_SENSORS_MAX; i++) {
-    modbusTCP.writeHreg(0, 100 + i, 0, nullptr, MODBUSIP_UNIT);
-  }
-  Serial.println("Modbus TCP Server gestartet");
+ 
 }
 
 void loop() {
-  if (isAP) {
-    dnsServer.processNextRequest();
-  }
+  unsigned long currentMillis = millis();
+  static unsigned long lastWebServerUpdate = 0;
   
-  server.handleClient();
+  // OTA Updates prüfen (häufiger als Webserver)
   ArduinoOTA.handle();
   
-  // Temperaturmessung im definierten Intervall
-  unsigned long currentMillis = millis();
+  // Webserver Tasks mit Intervall
+  if (currentMillis - lastWebServerUpdate >= WEB_SERVER_INTERVAL) {
+    lastWebServerUpdate = currentMillis;
+    server.handleClient();
+    serverRequestCount++;
+    
+    if (isAP) {
+      dnsServer.processNextRequest();
+    }
+    
+    // DNS Server nur im AP Modus
+  }
+  
+  // Modbus Tasks ausführen
+  mb.task();
+  
+  // Watchdog Reset verhindern
+  yield();
+  
+  // Temperaturen aktualisieren
   if (currentMillis - lastTempUpdate >= TEMP_UPDATE_INTERVAL) {
     lastTempUpdate = currentMillis;
-    
     sensors.requestTemperatures();
-    for (uint8_t i = 0; i < sensorCount; i++) {
-      uint8_t realIndex = sensorOrder[i];
-      float temp = sensors.getTempC(foundAddresses[realIndex]);
-      temps[i] = (temp == DEVICE_DISCONNECTED_C) ? -1270 : (int16_t)(temp * 10);
-      modbusTCP.writeHreg(0, 100 + i, (uint16_t)temps[i], nullptr, MODBUSIP_UNIT);  // Temperatur in Holding Register schreiben
+    
+    // Status Register aktualisieren (1 = OK, 0 = Fehler)
+    mb.Hreg(MB_STATUS_REG, 1);
+    
+    // Temperaturen in Modbus Register schreiben
+    for(int i = 0; i < NUM_SENSORS_MAX; i++) {
+      if (i < sensorCount) {
+        uint8_t realIndex = sensorOrder[i];
+        // Temperatur * 10 um eine Dezimalstelle zu behalten
+        float temp = sensors.getTempC(foundAddresses[realIndex]);
+        temps[i] = (temp == DEVICE_DISCONNECTED_C) ? -1270 : (int16_t)(temp * 10);
+        mb.Hreg(MB_TEMP_START + i, (uint16_t)temps[i]);
+      } else {
+        mb.Hreg(MB_TEMP_START + i, 0xFFFF); // Markiere nicht vorhandene Sensoren
+      }
     }
   }
   
-  // WLAN-Verbindung überprüfen und ggf. neu verbinden
-  if (!isAP && WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi connection lost, reconnecting...");
-    if (!connectWiFi()) {
-      Serial.println("Reconnection failed, starting AP mode...");
-      startAP();
+  // WLAN-Verbindung regelmäßig überprüfen
+  if (currentMillis - lastWiFiCheck >= WIFI_CHECK_INTERVAL) {
+    lastWiFiCheck = currentMillis;
+    if (!isAP) {
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi connection lost, reconnecting...");
+        WiFi.disconnect();
+        delay(1000);
+        if (!connectWiFi()) {
+          Serial.println("Reconnection failed, starting AP mode...");
+          startAP();
+        }
+      }
     }
   }
   
-  delay(10); // Kleine Pause für ESP32 Watchdog
+  // Webserver Watchdog
+  if (currentMillis - lastServerCheck >= SERVER_WATCHDOG_INTERVAL) {
+    lastServerCheck = currentMillis;
+    if (serverRequestCount == lastRequestCount && !isAP) {
+      Serial.println("No web requests received in watchdog interval, restarting...");
+      ESP.restart();
+    }
+    lastRequestCount = serverRequestCount;
+  }
+  
+  // Yield statt delay für besseres Task-Management
+  yield();
 }

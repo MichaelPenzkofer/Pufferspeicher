@@ -15,6 +15,11 @@ Dieses Projekt implementiert ein intelligentes Temperatursensor-System für Puff
 - Over-the-Air (OTA) Updates mit Passwortschutz
 - Automatische Wiederverbindung bei WLAN-Verlust
 - Offline-fähige Weboberfläche ohne externe Ressourcen
+- Webserver-Watchdog für erhöhte Stabilität
+- Regelmäßige WLAN-Verbindungsprüfung
+- Temperaturaktualisierung alle 12 Sekunden
+- DNS-Server im AP-Modus für einfache Konfiguration
+- Möglichkeit zum Zurücksetzen der WLAN-Konfiguration
 
 ## Installation und Einrichtung
 
@@ -101,6 +106,21 @@ Die Temperaturwerte sind über Modbus TCP verfügbar:
 - Server Port: 502 (Standard Modbus Port)
 - Register Start: 100
 - Temperaturwerte: Multipliziert mit 10 (z.B. 23,5°C = 235)
+
+## Over-the-Air (OTA) Updates
+
+Das System unterstützt drahtlose Firmware-Updates über WLAN:
+
+1. ESP32 muss mit dem WLAN verbunden sein
+2. In der Arduino IDE unter Tools -> Port den Netzwerk-Port auswählen
+   - Der ESP32 erscheint als "ESP32-Puffer at 192.168.x.x"
+3. Beim Upload das OTA-Passwort eingeben: "puffer123"
+4. Der Upload startet automatisch
+
+Hinweise:
+- Während des Updates blinkt die LED des ESP32
+- Das System startet nach erfolgreichem Update automatisch neu
+- Bei Verbindungsproblemen bitte die WLAN-Verbindung prüfen
 
 ## Fehlersuche
 
