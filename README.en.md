@@ -12,7 +12,6 @@ This project implements a smart temperature sensor system for buffer tanks based
 - Save and reset sensor order
 - Automatic WiFi configuration on first start
 - Modbus TCP server for system integration
-- Over-the-Air (OTA) updates with password protection
 - Automatic reconnection on WiFi loss
 - Offline-capable web interface without external resources
 - Webserver watchdog for increased stability
@@ -32,16 +31,6 @@ This project implements a smart temperature sensor system for buffer tanks based
 5. Flash Mode: QIO
 6. Flash Size: 4MB (32Mb)
 7. Partition Scheme: Default 4MB with spiffs
-
-### Over-the-Air (OTA) Updates
-
-After the initial installation via USB, further updates can be performed wirelessly:
-
-1. Connect ESP32 to WiFi
-2. In Arduino IDE, select the network port under Tools -> Port
-   - The ESP32 appears as "ESP32-Schichtung at 192.168.x.x"
-3. Enter the password "puffer123" when prompted
-4. The upload starts automatically
 
 ## Hardware Requirements
 
@@ -77,7 +66,6 @@ If you purchase the hardware through the Amazon product links provided here, you
    - OneWire
    - DallasTemperature
    - LittleFS
-   - ArduinoOTA
    - ModbusTCPServer
    - ArduinoJson
    - DNSServer
@@ -106,21 +94,6 @@ Temperature values are available via Modbus TCP:
 - Server Port: 502 (standard Modbus port)
 - Register Start: 100
 - Temperature values: Multiplied by 10 (e.g., 23.5°C = 235)
-
-## Over-the-Air (OTA) Updates
-
-The system supports wireless firmware updates over WiFi:
-
-1. ESP32 must be connected to WiFi
-2. In Arduino IDE, select the network port under Tools -> Port
-   - The ESP32 appears as "ESP32-Puffer at 192.168.x.x"
-3. Enter the OTA password when prompted: "puffer123"
-4. The upload starts automatically
-
-Notes:
-- The ESP32 LED blinks during the update
-- The system automatically restarts after a successful update
-- If connection issues occur, please check your WiFi connection
 
 ## Troubleshooting
 
