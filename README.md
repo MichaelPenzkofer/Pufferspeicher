@@ -47,7 +47,7 @@ Nach der ersten Installation über USB können weitere Updates drahtlos durchgef
 
 ### Notwendige Hardware
 
-- ESP32 Mikrocontroller https://amzn.to/3G2k1DU
+- ESP32 Mikrocontroller https://amzn.to/3GezHUC
 - DS18B20 Temperatursensoren (max. 10 Stück) https://amzn.to/4cv8dWT
 - DS18B20 Adapter Platine https://amzn.to/3R8Sxif
 - USB-C Kabel https://amzn.to/4lx5KPV
