@@ -13,7 +13,6 @@ Dieses Projekt implementiert ein intelligentes Temperatursensor-System für Puff
 - Automatische WLAN-Konfiguration im ersten Start
 - Modbus TCP Server für Systemintegration
 - Automatische Wiederverbindung bei WLAN-Verlust
-- Offline-fähige Weboberfläche ohne externe Ressourcen
 - Webserver-Watchdog für erhöhte Stabilität
 - Regelmäßige WLAN-Verbindungsprüfung
 - Temperaturaktualisierung alle 12 Sekunden
@@ -42,6 +41,7 @@ Dieses Projekt implementiert ein intelligentes Temperatursensor-System für Puff
 - USB-C Kabel https://amzn.to/4lx5KPV
 - USB-Type-C Netzteil https://amzn.to/3XSio1A
 - Gehäuse https://amzn.to/4cBsmL2
+- Aluminium Klebeband https://amzn.to/3EAXIEM
 
 ### Wenn du mir helfen möchtest
 
@@ -50,6 +50,11 @@ Wenn du bei der Auswahl der Hardware über die hier verlinkten Amazon-Produktlin
 ## Anschlüsse
 
 - OneWire Bus (DS18B20): GPIO4 (D4)
+
+| Anzahl Sensoren | Kabellänge | Pull-Up Empfehlung
+|----------------|------------|------------------
+| 1–3            | <5 m       | 4,7 kΩ
+| 4–10           | <10 m      | 2,2–3,3 kΩ
 
 ## Installation
 

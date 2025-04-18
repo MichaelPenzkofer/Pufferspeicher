@@ -42,6 +42,7 @@ This project implements a smart temperature sensor system for buffer tanks based
 - USB-C Cable https://amzn.to/4lx5KPV
 - USB Type-C Power Supply https://amzn.to/3XSio1A
 - Enclosure https://amzn.to/4cBsmL2
+- Aluminum Tape https://amzn.to/3EAXIEM
 
 ### Support the Project
 
@@ -50,6 +51,11 @@ If you purchase the hardware through the Amazon product links provided here, you
 ## Connections
 
 - OneWire Bus (DS18B20): GPIO4 (D4)
+
+| Number of Sensors | Cable Length | Pull-Up Recommendation
+|-----------------|--------------|---------------------
+| 1–3             | <5 m        | 4.7 kΩ
+| 4–10            | <10 m       | 2.2–3.3 kΩ
 
 ## Installation
 
