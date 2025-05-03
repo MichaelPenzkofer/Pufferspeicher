@@ -8,6 +8,11 @@
 #include <DNSServer.h>
 #include <SPIFFS.h>
 
+// --- Watchdog für ESP32 ---
+#ifdef ESP32
+#include <esp_task_wdt.h>
+#endif
+
 // --- Konstanten und Einstellungen ---
 #define ONE_WIRE_BUS 4 // GPIO4 für DS18B20
 #define NUM_SENSORS_MAX 10
@@ -18,8 +23,6 @@
 #define TEMP_UPDATE_INTERVAL 12000 // 12 Sekunden Intervall für Temperaturmessungen (750ms * 10 Sensoren + Overhead)
 #define DNS_PORT 53
 #define WIFI_CHECK_INTERVAL 60000 // 60 Sekunden Intervall für WLAN-Prüfung
-#define SERVER_WATCHDOG_INTERVAL 300000 // 5 Minuten Intervall für Webserver-Watchdog
-
 // --- Netzwerkdaten ---
 String ssid;
 String password;
@@ -27,15 +30,17 @@ const char* ap_ssid = "ESP32-Puffer-Setup";
 DNSServer dnsServer;
 bool isAP = false;
 unsigned long lastTempUpdate = 0;
-unsigned long lastWiFiCheck = 0;
-unsigned long lastServerCheck = 0;
-unsigned long serverRequestCount = 0;
-unsigned long lastRequestCount = 0;
+unsigned long lastWiFiCheck = 0; // Entfernt: Webserver-Watchdog-Variablen
+
 
 // --- Globale Variablen ---
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 ModbusIP mb; // ModbusIP Instanz
+
+// --- Re-Init Intervalle (z.B. alle 12h = 43.200.000 ms) ---
+#define REINIT_INTERVAL 43200000UL
+unsigned long lastReinit = 0;
 
 // Modbus Register Adressen
 #define MB_TEMP_START 100  // Startadresse für Temperaturen
@@ -45,11 +50,48 @@ ModbusIP mb; // ModbusIP Instanz
 // HTML-Datei im Flash-Speicher
 #include "index_html.h"
 
-WebServer server(80);
+WebServer* server = nullptr;
 DeviceAddress foundAddresses[NUM_SENSORS_MAX];
 uint8_t sensorCount = 0;
 uint8_t sensorOrder[NUM_SENSORS_MAX];
 int16_t temps[NUM_SENSORS_MAX];
+
+// --- Hilfsfunktionen für Re-Init ---
+void reinitModbus() {
+  mb = ModbusIP(); // Neu instanzieren
+  mb.server();
+  mb.addHreg(MB_STATUS_REG);
+  for(int i = 0; i < NUM_SENSORS_MAX; i++) {
+    mb.addHreg(MB_TEMP_START + i);
+  }
+  Serial.println("Modbus TCP Server wurde re-initialisiert!");
+}
+
+void reinitWebServer() {
+  if (server) {
+    server->close();
+    delete server;
+  }
+  server = new WebServer(80);
+  server->on("/", HTTP_GET, handleRoot);
+  server->on("/get_sensors", HTTP_GET, handleGetSensors);
+  server->on("/set_order", HTTP_POST, handlePostOrder);
+  server->on("/get_initial_order", HTTP_GET, handleGetInitialOrder);
+  server->on("/reset_order", HTTP_POST, handleResetOrder);
+  server->on("/reset_wifi", HTTP_POST, handleResetWiFi);
+  server->on("/set_wifi", HTTP_POST, handleWiFiConfig);
+  server->on("/get_mode", HTTP_GET, []() {
+    DynamicJsonDocument doc(64);
+    doc["isAP"] = isAP;
+    String response;
+    serializeJson(doc, response);
+    Serial.print("Current mode: ");
+    Serial.println(isAP ? "AP" : "STA");
+    server->send(200, "application/json", response);
+  });
+  server->begin();
+  Serial.println("Webserver wurde re-initialisiert!");
+}
 
 // --- Hilfsfunktionen ---
 String addressToString(DeviceAddress addr) {
@@ -147,7 +189,7 @@ void saveOrder(String json) {
 // --- HTTP-Endpunkte ---
 void handleRoot() {
   Serial.println("Handling root request...");
-  server.send(200, "text/html", index_html);
+  server->send(200, "text/html", index_html);
   Serial.println("index.html gesendet");
 }
 
@@ -166,7 +208,7 @@ void handleGetInitialOrder() {
 
   String out;
   serializeJson(doc, out);
-  server.send(200, "application/json", out);
+  server->send(200, "application/json", out);
 }
 
 void handleGetSensors() {
@@ -183,13 +225,13 @@ void handleGetSensors() {
 
   String out;
   serializeJson(doc, out);
-  server.send(200, "application/json", out);
+  server->send(200, "application/json", out);
 }
 
 void handlePostOrder() {
-  String body = server.arg("plain");
+  String body = server->arg("plain");
   saveOrder(body);
-  server.send(200, "text/plain", "OK");
+  server->send(200, "text/plain", "OK");
   loadOrder();
 }
 
@@ -255,26 +297,26 @@ bool connectWiFi() {
 }
 
 void handleWiFiConfig() {
-  if (server.method() != HTTP_POST) {
-    server.send(405, "text/plain", "Method Not Allowed");
+  if (server->method() != HTTP_POST) {
+    server->send(405, "text/plain", "Method Not Allowed");
     return;
   }
 
-  if (!server.hasArg("plain")) {
-    server.send(400, "text/plain", "Keine Daten empfangen");
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Keine Daten empfangen");
     return;
   }
 
   DynamicJsonDocument doc(256);
-  DeserializationError error = deserializeJson(doc, server.arg("plain"));
+  DeserializationError error = deserializeJson(doc, server->arg("plain"));
 
   if (error) {
-    server.send(400, "text/plain", "Ungültige JSON-Daten");
+    server->send(400, "text/plain", "Ungültige JSON-Daten");
     return;
   }
 
   if (!doc.containsKey("ssid") || !doc.containsKey("password")) {
-    server.send(400, "text/plain", "SSID und Passwort erforderlich");
+    server->send(400, "text/plain", "SSID und Passwort erforderlich");
     return;
   }
 
@@ -282,7 +324,7 @@ void handleWiFiConfig() {
   String newPassword = doc["password"].as<String>();
 
   if (newSsid.length() == 0) {
-    server.send(400, "text/plain", "SSID darf nicht leer sein");
+    server->send(400, "text/plain", "SSID darf nicht leer sein");
     return;
   }
   
@@ -290,7 +332,7 @@ void handleWiFiConfig() {
   password = newPassword;
   saveWiFiConfig();
   
-  server.send(200, "text/plain", "OK");
+  server->send(200, "text/plain", "OK");
   delay(1000);
   ESP.restart();
 }
@@ -323,7 +365,7 @@ void resetSensorOrder() {
 }
 
 void handleResetWiFi() {
-  server.send(200, "text/plain", "OK");
+  server->send(200, "text/plain", "OK");
   delay(100);  // Brief delay to allow response to be sent
   resetWiFiConfig();
   delay(1000);  // Allow time for AP mode to start
@@ -332,13 +374,27 @@ void handleResetWiFi() {
 
 void handleResetOrder() {
   resetSensorOrder();
-  server.send(200, "text/plain", "OK");
+  server->send(200, "text/plain", "OK");
   // No restart needed for order reset
 }
 
 void setup() {
+  server = new WebServer(80);
   Serial.begin(115200);
   Serial.println("\nPufferspeicher Temperatursensor System startet...");
+
+  // --- Hardware-Watchdog initialisieren (nur ESP32) ---
+#ifdef ESP32
+  // Watchdog-Konfiguration für aktuelle ESP-IDF
+  esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = 10000,      // 10 Sekunden Timeout
+    .idle_core_mask = (1 << portNUM_PROCESSORS) - 1, // alle Kerne überwachen
+    .trigger_panic = true     // Reset bei Timeout
+  };
+  esp_task_wdt_init(&wdt_config);
+  esp_task_wdt_add(NULL); // Haupt-Task hinzufügen
+  Serial.println("ESP32 Hardware-Watchdog aktiviert (10s Timeout)");
+#endif
   
   // Sensoren initialisieren
   sensors.begin();
@@ -374,23 +430,23 @@ void setup() {
   loadOrder();
 
   // Server-Endpunkte registrieren
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/get_sensors", HTTP_GET, handleGetSensors);
-  server.on("/set_order", HTTP_POST, handlePostOrder);
-  server.on("/get_initial_order", HTTP_GET, handleGetInitialOrder);
-  server.on("/reset_order", HTTP_POST, handleResetOrder);
-  server.on("/reset_wifi", HTTP_POST, handleResetWiFi);
-  server.on("/set_wifi", HTTP_POST, handleWiFiConfig);
-  server.on("/get_mode", HTTP_GET, []() {
+  server->on("/", HTTP_GET, handleRoot);
+  server->on("/get_sensors", HTTP_GET, handleGetSensors);
+  server->on("/set_order", HTTP_POST, handlePostOrder);
+  server->on("/get_initial_order", HTTP_GET, handleGetInitialOrder);
+  server->on("/reset_order", HTTP_POST, handleResetOrder);
+  server->on("/reset_wifi", HTTP_POST, handleResetWiFi);
+  server->on("/set_wifi", HTTP_POST, handleWiFiConfig);
+  server->on("/get_mode", HTTP_GET, []() {
     DynamicJsonDocument doc(64);
     doc["isAP"] = isAP;
     String response;
     serializeJson(doc, response);
     Serial.print("Current mode: ");
     Serial.println(isAP ? "AP" : "STA");
-    server.send(200, "application/json", response);
+    server->send(200, "application/json", response);
   });
-  server.begin();
+  server->begin();
 
 
  
@@ -398,14 +454,43 @@ void setup() {
 
 void loop() {
   unsigned long currentMillis = millis();
+  static unsigned long lastHeapLog = 0;
   static unsigned long lastWebServerUpdate = 0;
+
+  // --- Modbus & Webserver regelmäßig re-initialisieren ---
+  if (currentMillis - lastReinit >= REINIT_INTERVAL) {
+    lastReinit = currentMillis;
+    Serial.println("[ReInit] Modbus und Webserver werden neu initialisiert...");
+    reinitModbus();
+    reinitWebServer();
+  }
   
-  
+  // --- Watchdog regelmäßig zurücksetzen (nur ESP32) ---
+#ifdef ESP32
+  esp_task_wdt_reset();
+#endif
+
+  // --- Heap-Speicher regelmäßig ausgeben ---
+  int heapFree = ESP.getFreeHeap();
+  if (currentMillis - lastHeapLog >= 60000) { // alle 60 Sekunden
+    lastHeapLog = currentMillis;
+    Serial.print("[Heap] Freier Speicher: ");
+    Serial.print(heapFree);
+    Serial.println(" Bytes");
+  }
+
+  // --- Automatischer Neustart bei zu wenig Speicher ---
+  if (heapFree < 20000) { // Schwellenwert ggf. anpassen
+    Serial.println("[Heap] Kritisch wenig Speicher! Neustart wird ausgelöst...");
+    delay(1000); // kurze Wartezeit für serielle Ausgabe
+    ESP.restart();
+  }
+
   // Webserver Tasks mit Intervall
   if (currentMillis - lastWebServerUpdate >= WEB_SERVER_INTERVAL) {
     lastWebServerUpdate = currentMillis;
-    server.handleClient();
-    serverRequestCount++;
+    server->handleClient();
+    // Entfernt: serverRequestCount++
     
     if (isAP) {
       dnsServer.processNextRequest();
@@ -458,15 +543,7 @@ void loop() {
     }
   }
   
-  // Webserver Watchdog
-  if (currentMillis - lastServerCheck >= SERVER_WATCHDOG_INTERVAL) {
-    lastServerCheck = currentMillis;
-    if (serverRequestCount == lastRequestCount && !isAP) {
-      Serial.println("No web requests received in watchdog interval, restarting...");
-      ESP.restart();
-    }
-    lastRequestCount = serverRequestCount;
-  }
+
   
   // Yield statt delay für besseres Task-Management
   yield();
