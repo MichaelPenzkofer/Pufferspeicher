@@ -64,7 +64,7 @@ void reinitModbus() {
   for(int i = 0; i < NUM_SENSORS_MAX; i++) {
     mb.addHreg(MB_TEMP_START + i);
   }
-  Serial.println("Modbus TCP Server wurde re-initialisiert!");
+  logMessage("Modbus TCP Server wurde re-initialisiert!");
 }
 
 void reinitWebServer() {
@@ -90,7 +90,7 @@ void reinitWebServer() {
     server->send(200, "application/json", response);
   });
   server->begin();
-  Serial.println("Webserver wurde re-initialisiert!");
+  logMessage("Webserver wurde re-initialisiert!");
 }
 
 // --- Hilfsfunktionen ---
@@ -186,11 +186,34 @@ void saveOrder(String json) {
   file.close();
 }
 
+// --- Logging Funktion ---
+#define LOGFILE "/log.txt"
+#define MAX_LOG_SIZE 16384  // 16 KB
+
+void logMessage(String msg) {
+  File logFile = SPIFFS.open(LOGFILE, "a");
+  if (logFile) {
+    logFile.println(msg);
+    logFile.close();
+  }
+  // Prüfen, ob die Datei zu groß ist
+  logFile = SPIFFS.open(LOGFILE, "r");
+  if (logFile && logFile.size() > MAX_LOG_SIZE) {
+    // Alte Einträge entfernen: z.B. erste 1 KB abschneiden
+    logFile.seek(1024, SeekSet);
+    String rest = logFile.readString();
+    logFile.close();
+    logFile = SPIFFS.open(LOGFILE, "w");
+    logFile.print(rest);
+    logFile.close();
+  }
+}
+
 // --- HTTP-Endpunkte ---
 void handleRoot() {
-  Serial.println("Handling root request...");
+  logMessage("Handling root request...");
   server->send(200, "text/html", index_html);
-  Serial.println("index.html gesendet");
+  logMessage("index.html gesendet");
 }
 
 void handleGetInitialOrder() {
@@ -209,6 +232,16 @@ void handleGetInitialOrder() {
   String out;
   serializeJson(doc, out);
   server->send(200, "application/json", out);
+}
+
+void handleDownloadLog() {
+  File logFile = SPIFFS.open(LOGFILE, "r");
+  if (!logFile) {
+    server->send(404, "text/plain", "Logdatei nicht gefunden");
+    return;
+  }
+  server->streamFile(logFile, "text/plain");
+  logFile.close();
 }
 
 void handleGetSensors() {
@@ -286,13 +319,14 @@ bool connectWiFi() {
   }
   
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi connection failed");
+    logMessage("WiFi connection failed");
     return false;
   }
   
-  Serial.println("WiFi connected");
-  Serial.print("IP: ");
+  logMessage("WiFi connected");
+  logMessage("IP: ");
   Serial.println(WiFi.localIP());
+  logMessage(WiFi.localIP().toString());
   return true;
 }
 
@@ -379,9 +413,12 @@ void handleResetOrder() {
 }
 
 void setup() {
+  // ...
+  server->on("/download_log", HTTP_GET, handleDownloadLog);
+
   server = new WebServer(80);
   Serial.begin(115200);
-  Serial.println("\nPufferspeicher Temperatursensor System startet...");
+  logMessage("Pufferspeicher Temperatursensor System startet...");
 
   // --- Hardware-Watchdog initialisieren (nur ESP32) ---
 #ifdef ESP32
@@ -393,7 +430,7 @@ void setup() {
   };
   esp_task_wdt_init(&wdt_config);
   esp_task_wdt_add(NULL); // Haupt-Task hinzufügen
-  Serial.println("ESP32 Hardware-Watchdog aktiviert (10s Timeout)");
+  logMessage("ESP32 Hardware-Watchdog aktiviert (10s Timeout)");
 #endif
   
   // Sensoren initialisieren
@@ -403,10 +440,10 @@ void setup() {
   
   // Initialize SPIFFS
   if(!SPIFFS.begin(true)) {
-    Serial.println("SPIFFS Mount Failed");
+    logMessage("SPIFFS Mount Failed");
     return;
   }
-  Serial.println("SPIFFS Mount Successful");
+  logMessage("SPIFFS Mount Successful");
    
   
   loadWiFiConfig();
@@ -422,7 +459,7 @@ void setup() {
       mb.addHreg(MB_TEMP_START + i);
     }
     
-    Serial.println("Modbus TCP Server gestartet auf Port 502");
+    logMessage("Modbus TCP Server gestartet auf Port 502");
   }
   
 
@@ -460,7 +497,7 @@ void loop() {
   // --- Modbus & Webserver regelmäßig re-initialisieren ---
   if (currentMillis - lastReinit >= REINIT_INTERVAL) {
     lastReinit = currentMillis;
-    Serial.println("[ReInit] Modbus und Webserver werden neu initialisiert...");
+    logMessage("[ReInit] Modbus und Webserver werden neu initialisiert...");
     reinitModbus();
     reinitWebServer();
   }
@@ -474,14 +511,12 @@ void loop() {
   int heapFree = ESP.getFreeHeap();
   if (currentMillis - lastHeapLog >= 60000) { // alle 60 Sekunden
     lastHeapLog = currentMillis;
-    Serial.print("[Heap] Freier Speicher: ");
-    Serial.print(heapFree);
-    Serial.println(" Bytes");
+    logMessage(String("[Heap] Freier Speicher: ") + String(heapFree) + " Bytes");
   }
 
   // --- Automatischer Neustart bei zu wenig Speicher ---
   if (heapFree < 20000) { // Schwellenwert ggf. anpassen
-    Serial.println("[Heap] Kritisch wenig Speicher! Neustart wird ausgelöst...");
+    logMessage("[Heap] Kritisch wenig Speicher! Neustart wird ausgelöst...");
     delay(1000); // kurze Wartezeit für serielle Ausgabe
     ESP.restart();
   }
@@ -532,13 +567,12 @@ void loop() {
     lastWiFiCheck = currentMillis;
     if (!isAP) {
       if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("WiFi connection lost, reconnecting...");
+        logMessage("WiFi connection lost, reconnecting...");
         WiFi.disconnect();
         delay(1000);
         if (!connectWiFi()) {
-          Serial.println("Reconnection failed, starting AP mode...");
-          startAP();
-        }
+            logMessage("Reconnection failed, will keep trying...");
+          }
       }
     }
   }

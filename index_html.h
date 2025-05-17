@@ -240,6 +240,7 @@ const char index_html[] PROGMEM = R"rawliteral(
       updateInterval = setInterval(fetchSensors, 5000);
     }
   </script>
+<button onclick="window.location.href='/download_log'">Logdatei herunterladen</button>
 </body>
 </html>
 )rawliteral";
