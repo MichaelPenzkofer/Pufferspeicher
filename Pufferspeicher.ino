@@ -399,7 +399,7 @@ void setup() {
   // Sensoren initialisieren
   sensors.begin();
   sensors.setResolution(12); // 12-bit Auflösung (0.0625°C)
-  sensors.setWaitForConversion(true);
+  sensors.setWaitForConversion(false);
   
   // Initialize SPIFFS
   if(!SPIFFS.begin(true)) {
